@@ -1,7 +1,12 @@
 {
   "name": "ticket-helper-bot",
   "version": "1.0.0",
+  "description": "A helper bot for Ticket Tool that sends reminders and auto-closes tickets.",
   "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "discord.js": "^14.14.0",
     "dotenv": "^16.0.3"
