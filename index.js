@@ -1,7 +1,7 @@
 import { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder } from "discord.js";
 import dotenv from "dotenv";
-import fs from "fs";
 import http from "http";
+import mongoose from "mongoose";
 dotenv.config();
 
 const client = new Client({
@@ -18,52 +18,26 @@ const {
   STAFF_ROLE_ID,
   KING_ROLE_ID,
   LOG_CHANNEL_ID,
-  TICKET_TOOL_BOT_ID
+  TICKET_TOOL_BOT_ID,
+  MONGODB_URI
 } = process.env;
 
 const START_DELAY = 10 * 60 * 1000; // 10 min start after KING/Staff message
 const REMINDER_INTERVAL = 6 * 60 * 60 * 1000; // 6h reminder
 const STAFF_ALERT_TIME = 24 * 60 * 60 * 1000; // 24h staff alert
-const STORAGE_FILE = "./ticket-data.json"; // Persistent storage file
 
-const tickets = new Map();
+// === MONGODB SCHEMA ===
+const ticketSchema = new mongoose.Schema({
+  channelId: { type: String, required: true, unique: true },
+  creatorId: { type: String, required: true },
+  timerStartTime: { type: Number, default: null },
+  reminderCount: { type: Number, default: 0 }
+});
 
-// --- PERSISTENT STORAGE FUNCTIONS ---
-function saveTickets() {
-  try {
-    const data = {};
-    for (const [channelId, ticket] of tickets.entries()) {
-      // Only save essential data, not timers (they'll be recreated)
-      data[channelId] = {
-        creatorId: ticket.creatorId,
-        timerStartTime: ticket.timerStartTime,
-        reminderCount: ticket.reminderCount || 0
-      };
-    }
-    fs.writeFileSync(STORAGE_FILE, JSON.stringify(data, null, 2));
-  } catch (error) {
-    console.error("❌ Error saving tickets:", error);
-  }
-}
+const Ticket = mongoose.model('Ticket', ticketSchema);
 
-function loadTickets() {
-  try {
-    if (fs.existsSync(STORAGE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(STORAGE_FILE, "utf8"));
-      for (const [channelId, ticketData] of Object.entries(data)) {
-        tickets.set(channelId, {
-          creatorId: ticketData.creatorId,
-          timers: {},
-          timerStartTime: ticketData.timerStartTime || null,
-          reminderCount: ticketData.reminderCount || 0
-        });
-      }
-      console.log(`✅ Loaded ${tickets.size} tickets from storage`);
-    }
-  } catch (error) {
-    console.error("❌ Error loading tickets:", error);
-  }
-}
+// In-memory timers (not stored in DB)
+const timers = new Map();
 
 // --- SLASH COMMANDS ---
 const commands = [
@@ -106,54 +80,54 @@ function log(message, guild) {
 
 // --- CLEAR TIMERS ---
 function clearAllTimers(channelId) {
-  const ticket = tickets.get(channelId);
-  if (!ticket) return;
-  if (ticket.timers.start) clearTimeout(ticket.timers.start);
-  if (ticket.timers.repeat) clearInterval(ticket.timers.repeat);
-  if (ticket.timers.staff) clearTimeout(ticket.timers.staff);
-  ticket.timers = {};
-  ticket.timerStartTime = null;
-  ticket.reminderCount = 0;
-  saveTickets(); // Save cleared state
+  const timer = timers.get(channelId);
+  if (!timer) return;
+  if (timer.start) clearTimeout(timer.start);
+  if (timer.repeat) clearInterval(timer.repeat);
+  if (timer.staff) clearTimeout(timer.staff);
+  timers.delete(channelId);
 }
 
 // --- START TIMERS ---
-function startTimers(channel) {
+async function startTimers(channel) {
   const channelId = channel.id;
-  const ticket = tickets.get(channelId);
+  const ticket = await Ticket.findOne({ channelId });
   if (!ticket) return;
 
   // Clear any existing timers first
   clearAllTimers(channelId);
 
-  ticket.timers.start = setTimeout(() => {
+  const timer = {};
+  timer.start = setTimeout(async () => {
     // Mark when timer actually started
     ticket.timerStartTime = Date.now();
     ticket.reminderCount = 0;
+    await ticket.save();
     
-    saveTickets(); // Save timer start time
     log(`⏱️ **Timer started** in ${channel}`, channel.guild);
 
     // Set up reminder interval (first reminder at 6 hours, then every 6 hours)
-    ticket.timers.repeat = setInterval(() => {
+    timer.repeat = setInterval(() => {
       sendReminder(channel);
     }, REMINDER_INTERVAL);
 
     // Set up staff alert (24 hours from when timer started)
-    ticket.timers.staff = setTimeout(() => {
+    timer.staff = setTimeout(() => {
       sendStaffAlert(channel);
     }, STAFF_ALERT_TIME);
 
   }, START_DELAY);
+
+  timers.set(channelId, timer);
 }
 
 // --- SEND REMINDER ---
-function sendReminder(channel) {
-  const ticket = tickets.get(channel.id);
+async function sendReminder(channel) {
+  const ticket = await Ticket.findOne({ channelId: channel.id });
   if (!ticket) return;
   
   ticket.reminderCount = (ticket.reminderCount || 0) + 1;
-  saveTickets(); // Save reminder count
+  await ticket.save();
   
   // Different message for final reminder (3rd one)
   const isFinalReminder = ticket.reminderCount === 3;
@@ -178,8 +152,8 @@ function sendReminder(channel) {
 }
 
 // --- SEND STAFF ALERT ---
-function sendStaffAlert(channel) {
-  const ticket = tickets.get(channel.id);
+async function sendStaffAlert(channel) {
+  const ticket = await Ticket.findOne({ channelId: channel.id });
   const embed = new EmbedBuilder()
     .setColor("Red")
     .setTitle("⏰ 24-Hour Inactivity Alert")
@@ -206,13 +180,23 @@ function getTimeElapsed(startTime) {
 client.once("clientready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  // Load saved tickets from file
-  loadTickets();
+  // Connect to MongoDB
+  try {
+    await mongoose.connect(MONGODB_URI);
+    console.log("✅ Connected to MongoDB");
+  } catch (error) {
+    console.error("❌ MongoDB connection error:", error);
+    process.exit(1);
+  }
+
+  // Load all tickets from MongoDB
+  const tickets = await Ticket.find({});
+  console.log(`✅ Loaded ${tickets.length} tickets from database`);
 
   // Restore active timers for tickets that had timers running
-  for (const [channelId, ticket] of tickets.entries()) {
+  for (const ticket of tickets) {
     if (ticket.timerStartTime) {
-      const channel = await client.channels.fetch(channelId).catch(() => null);
+      const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
       if (channel) {
         const elapsed = Date.now() - ticket.timerStartTime;
         
@@ -224,8 +208,10 @@ client.once("clientready", async () => {
           const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
           const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
           
+          const timer = {};
+          
           // Set up next reminder
-          ticket.timers.repeat = setInterval(() => {
+          timer.repeat = setInterval(() => {
             sendReminder(channel);
           }, REMINDER_INTERVAL);
           
@@ -235,28 +221,27 @@ client.once("clientready", async () => {
           } else {
             setTimeout(() => {
               sendReminder(channel);
-              // Then continue with regular interval
             }, timeToNextReminder);
           }
           
           // Set up staff alert for remaining time
-          ticket.timers.staff = setTimeout(() => {
+          timer.staff = setTimeout(() => {
             sendStaffAlert(channel);
           }, remainingTime);
           
-          console.log(`🔄 Restored timer for ticket ${channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
+          timers.set(ticket.channelId, timer);
+          
+          console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
         } else {
           // Timer expired during downtime, send staff alert now
           sendStaffAlert(channel);
         }
       } else {
         // Channel doesn't exist anymore, clean up
-        tickets.delete(channelId);
+        await Ticket.deleteOne({ channelId: ticket.channelId });
       }
     }
   }
-  
-  saveTickets(); // Save after cleanup
 
   const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
   try {
@@ -282,7 +267,9 @@ client.on("messageCreate", async message => {
   const isStaff = member?.roles.cache.has(STAFF_ROLE_ID) || member?.roles.cache.has(KING_ROLE_ID);
 
   // === TICKET CREATOR DETECTION (Only once when ticket is created) ===
-  if (!tickets.has(channel.id)) {
+  let ticket = await Ticket.findOne({ channelId: channel.id });
+  
+  if (!ticket) {
     let creatorId = null;
 
     // If message is from the ticket tool bot, find the first mentioned user (not staff/king)
@@ -292,7 +279,6 @@ client.on("messageCreate", async message => {
         if (mentionedMember) {
           const isMentionedStaff = mentionedMember.roles.cache.has(STAFF_ROLE_ID) || 
                                    mentionedMember.roles.cache.has(KING_ROLE_ID);
-          // Skip if it's a role mention or staff member
           if (!isMentionedStaff && !user.bot) {
             creatorId = id;
             break;
@@ -306,24 +292,24 @@ client.on("messageCreate", async message => {
     }
 
     if (creatorId) {
-      tickets.set(channel.id, { 
-        creatorId, 
-        timers: {}, 
+      ticket = await Ticket.create({
+        channelId: channel.id,
+        creatorId,
         timerStartTime: null,
         reminderCount: 0
       });
-      saveTickets(); // Save to file
       log(`🎫 **Ticket creator stored:** <@${creatorId}> in ${channel}`, message.guild);
     }
     return;
   }
 
-  const ticket = tickets.get(channel.id);
-
   // === CREATOR REPLY → STOP TIMERS ===
   if (!isStaff && message.author.id === ticket.creatorId) {
     const wasActive = ticket.timerStartTime !== null;
     clearAllTimers(channel.id);
+    ticket.timerStartTime = null;
+    ticket.reminderCount = 0;
+    await ticket.save();
     if (wasActive) {
       log(`🛑 **Timer stopped** (creator replied) in ${channel}`, message.guild);
     }
@@ -348,14 +334,14 @@ client.on("interactionCreate", async interaction => {
   if (!isStaff) {
     return interaction.reply({ 
       content: "❌ You are not authorized to use this command.", 
-      flags: 64 // MessageFlags.Ephemeral
+      flags: 64
     });
   }
 
   // === /TIMER COMMAND ===
   if (interaction.commandName === "timer") {
     const action = interaction.options.getString("action");
-    const ticket = tickets.get(channel.id);
+    const ticket = await Ticket.findOne({ channelId: channel.id });
 
     switch(action) {
       case "stop":
@@ -366,10 +352,10 @@ client.on("interactionCreate", async interaction => {
           });
         }
         clearAllTimers(channel.id);
-        await interaction.reply({ 
-          content: "⏹️ **Timer stopped immediately.**", 
-          flags: 64 
-        });
+        ticket.timerStartTime = null;
+        ticket.reminderCount = 0;
+        await ticket.save();
+        await interaction.reply({ content: "⏹️ **Timer stopped immediately.**", flags: 64 });
         log(`⏹️ **Timer manually stopped** in ${channel}`, channel.guild);
         break;
 
@@ -385,18 +371,21 @@ client.on("interactionCreate", async interaction => {
         // Restart timer immediately without 10min delay and WITHOUT sending reminder
         ticket.timerStartTime = Date.now();
         ticket.reminderCount = 0;
+        await ticket.save();
         
-        saveTickets(); // Save restarted state
+        const timer = {};
         
         // First reminder will come after 6 hours
-        ticket.timers.repeat = setInterval(() => {
+        timer.repeat = setInterval(() => {
           sendReminder(channel);
         }, REMINDER_INTERVAL);
         
         // Staff alert after 24 hours
-        ticket.timers.staff = setTimeout(() => {
+        timer.staff = setTimeout(() => {
           sendStaffAlert(channel);
         }, STAFF_ALERT_TIME);
+        
+        timers.set(channel.id, timer);
         
         await interaction.reply({ 
           content: "🔄 **Timer restarted immediately.** First reminder will be sent in 6 hours.", 
@@ -436,7 +425,7 @@ client.on("interactionCreate", async interaction => {
   // === /CREATOR COMMAND ===
   if (interaction.commandName === "creator") {
     const action = interaction.options.getString("action");
-    const ticket = tickets.get(channel.id);
+    const ticket = await Ticket.findOne({ channelId: channel.id });
 
     if (action === "check") {
       if (!ticket) {
@@ -466,18 +455,17 @@ client.on("interactionCreate", async interaction => {
       }
       
       // Create or update ticket creator
-      if (!tickets.has(channel.id)) {
-        tickets.set(channel.id, { 
-          creatorId: user.id, 
-          timers: {}, 
+      if (!ticket) {
+        await Ticket.create({
+          channelId: channel.id,
+          creatorId: user.id,
           timerStartTime: null,
           reminderCount: 0
         });
       } else {
-        tickets.get(channel.id).creatorId = user.id;
+        ticket.creatorId = user.id;
+        await ticket.save();
       }
-      
-      saveTickets(); // Save assigned creator
       
       await interaction.reply({ 
         content: `✅ **Ticket creator manually assigned to** <@${user.id}>`, 
@@ -488,12 +476,12 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-// === CHANNEL DELETE HANDLER (Clean up memory) ===
-client.on("channelDelete", channel => {
-  if (tickets.has(channel.id)) {
+// === CHANNEL DELETE HANDLER (Clean up database) ===
+client.on("channelDelete", async channel => {
+  const ticket = await Ticket.findOne({ channelId: channel.id });
+  if (ticket) {
     clearAllTimers(channel.id);
-    tickets.delete(channel.id);
-    saveTickets(); // Save after deletion
+    await Ticket.deleteOne({ channelId: channel.id });
     console.log(`🗑️ Cleaned up ticket data for deleted channel ${channel.id}`);
   }
 });
@@ -510,21 +498,26 @@ if (!TICKET_CATEGORY_ID || !STAFF_ROLE_ID || !KING_ROLE_ID || !LOG_CHANNEL_ID ||
   process.exit(1);
 }
 
+if (!MONGODB_URI) {
+  console.error("❌ MONGODB_URI missing in .env file");
+  process.exit(1);
+}
+
 client.login(DISCORD_BOT_TOKEN);
 
-// === KEEP-ALIVE WEB SERVER FOR REPLIT ===
-// This creates a simple web server that Uptime Robot can ping to keep your bot running 24/7
+// === KEEP-ALIVE WEB SERVER FOR RENDER ===
 const PORT = process.env.PORT || 3000;
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   if (req.url === "/" || req.url === "/ping") {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("Bot is alive! 🤖");
   } else if (req.url === "/status") {
+    const ticketCount = await Ticket.countDocuments();
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({
       status: "online",
-      tickets: tickets.size,
+      tickets: ticketCount,
       uptime: process.uptime(),
       timestamp: new Date().toISOString()
     }));
