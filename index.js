@@ -155,11 +155,22 @@ function sendReminder(channel) {
   ticket.reminderCount = (ticket.reminderCount || 0) + 1;
   saveTickets(); // Save reminder count
   
+  // Different message for final reminder (3rd one)
+  const isFinalReminder = ticket.reminderCount === 3;
+  
   const embed = new EmbedBuilder()
-    .setColor("Yellow")
-    .setTitle("🔔 Ticket Reminder")
-    .setDescription(`<@${ticket.creatorId}>, please reply to this ticket.\n\n⚠️ **Warning:** Staff may close this ticket after 24 hours if there's no response.`)
-    .setFooter({ text: `Reminder #${ticket.reminderCount} • Automatic reminder every 6 hours` })
+    .setColor(isFinalReminder ? "Red" : "Yellow")
+    .setTitle(isFinalReminder ? "🔔 Final Ticket Reminder ⚠️" : "🔔 Ticket Reminder")
+    .setDescription(
+      isFinalReminder 
+        ? `<@${ticket.creatorId}>, please respond to this ticket immediately.\n\n• If you have any questions or need help, reply now\n• If your issue is solved, click the 🔒 button to close the ticket\n• ⚠️ This is your last chance - our team will close this ticket in 6 hours if you don't respond`
+        : `<@${ticket.creatorId}>, please respond to this ticket.\n\n• If you have any questions or need help, reply here\n• If your issue is solved, click the 🔒 button to close the ticket\n• If we don't hear from you within 24 hours, our team may close this ticket`
+    )
+    .setFooter({ 
+      text: isFinalReminder 
+        ? "Reminder 3 of 3 • Final warning - 6 hours remaining" 
+        : `Reminder ${ticket.reminderCount} of 3 • Next reminder in 6 hours` 
+    })
     .setTimestamp();
   
   channel.send({ embeds: [embed] }).catch(() => {});
