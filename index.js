@@ -506,7 +506,7 @@ if (!MONGODB_URI) {
 client.login(DISCORD_BOT_TOKEN);
 
 // === KEEP-ALIVE WEB SERVER FOR RENDER ===
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/" || req.url === "/ping") {
