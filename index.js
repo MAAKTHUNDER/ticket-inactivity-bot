@@ -521,11 +521,33 @@ const server = http.createServer(async (req, res) => {
       uptime: process.uptime(),
       timestamp: new Date().toISOString()
     }));
+  } else if (req.url === "/test-db") {
+    try {
+      const ticketCount = await Ticket.countDocuments();
+      const tickets = await Ticket.find().limit(5);
+      const dbState = mongoose.connection.readyState;
+      
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        mongooseState: dbState === 1 ? "connected" : "disconnected",
+        ticketCount: ticketCount,
+        tickets: tickets,
+        mongodbURI: MONGODB_URI ? "present" : "missing"
+      }));
+    } catch (error) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: error.message }));
+    }
   } else {
     res.writeHead(404);
     res.end("Not found");
   }
 });
+```
+
+Update this in GitHub, then visit:
+```
+https://ticket-inactivity-bot.onrender.com/test-db
 
 server.listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
