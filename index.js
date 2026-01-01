@@ -543,7 +543,7 @@ const server = http.createServer(async (req, res) => {
     res.end("Not found");
   }
 });
-```js
+
 server.listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
   console.log(`📍 Use this URL in Uptime Robot: https://your-repl-name.your-username.repl.co`);
