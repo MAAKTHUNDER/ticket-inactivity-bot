@@ -4,6 +4,9 @@ import http from "http";
 import mongoose from "mongoose";
 dotenv.config();
 
+// Disable mongoose buffering to prevent hanging
+mongoose.set("bufferCommands", false);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -179,15 +182,6 @@ function getTimeElapsed(startTime) {
 // --- READY EVENT ---
 client.once("clientready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-
-  // Connect to MongoDB
-  try {
-    await mongoose.connect(MONGODB_URI);
-    console.log("✅ Connected to MongoDB");
-  } catch (error) {
-    console.error("❌ MongoDB connection error:", error);
-    process.exit(1);
-  }
 
   // Load all tickets from MongoDB
   const tickets = await Ticket.find({});
@@ -503,10 +497,26 @@ if (!MONGODB_URI) {
   process.exit(1);
 }
 
+// === CONNECT TO MONGODB FIRST ===
+async function connectMongo() {
+  try {
+    mongoose.set("strictQuery", true);
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 15000
+    });
+    console.log("✅ Connected to MongoDB");
+  } catch (err) {
+    console.error("❌ MongoDB connection failed:", err.message);
+    process.exit(1);
+  }
+}
+
+await connectMongo();
+
 client.login(DISCORD_BOT_TOKEN);
 
 // === KEEP-ALIVE WEB SERVER FOR RENDER ===
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 const server = http.createServer(async (req, res) => {
   if (req.url === "/" || req.url === "/ping") {
@@ -522,17 +532,24 @@ const server = http.createServer(async (req, res) => {
       timestamp: new Date().toISOString()
     }));
   } else if (req.url === "/test-db") {
+    if (mongoose.connection.readyState !== 1) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({
+        error: "MongoDB not connected",
+        readyState: mongoose.connection.readyState
+      }));
+    }
+
     try {
       const ticketCount = await Ticket.countDocuments();
       const tickets = await Ticket.find().limit(5);
-      const dbState = mongoose.connection.readyState;
-      
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        mongooseState: dbState === 1 ? "connected" : "disconnected",
-        ticketCount: ticketCount,
-        tickets: tickets,
-        mongodbURI: MONGODB_URI ? "present" : "missing"
+        mongooseState: "connected",
+        ticketCount,
+        tickets,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
       }));
     } catch (error) {
       res.writeHead(500, { "Content-Type": "application/json" });
