@@ -546,7 +546,7 @@ const server = http.createServer(async (req, res) => {
 ```
 
 Update this in GitHub, then visit:
-```
+
 https://ticket-inactivity-bot.onrender.com/test-db
 
 server.listen(PORT, () => {
