@@ -267,15 +267,17 @@ client.once("clientready", async () => {
     }
   }
 
-  const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
+  // Register slash commands at the end
+  console.log("🔄 Registering slash commands...");
   try {
+    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
     await rest.put(
       Routes.applicationCommands(client.user.id),
       { body: commands }
     );
-    console.log("✅ Global slash commands registered. May take up to 1 hour to appear.");
+    console.log("✅ Slash commands registered successfully!");
   } catch (error) {
-    console.error("❌ Error registering commands:", error);
+    console.error("❌ Command registration error:", error);
   }
 });
 
