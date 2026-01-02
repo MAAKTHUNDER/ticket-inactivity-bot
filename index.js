@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder } from "discord.js";
+import { Client, GatewayIntentBits, EmbedBuilder, REST, Routes, SlashCommandBuilder, Events } from "discord.js";
 import dotenv from "dotenv";
 import http from "http";
 import mongoose from "mongoose";
@@ -210,12 +210,13 @@ function getTimeElapsed(startTime) {
 }
 
 // --- READY EVENT ---
-client.once("clientready", async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+client.once(Events.ClientReady, async () => {
+  try {
+    console.log(`✅ Logged in as ${client.user.tag}`);
 
-  // Load all tickets from MongoDB
-  const tickets = await Ticket.find({});
-  console.log(`✅ Loaded ${tickets.length} tickets from database`);
+    // Load all tickets from MongoDB
+    const tickets = await Ticket.find({});
+    console.log(`✅ Loaded ${tickets.length} tickets from database`);
 
   // Restore active timers for tickets that had timers running
   for (const ticket of tickets) {
@@ -266,18 +267,9 @@ client.once("clientready", async () => {
       }
     }
   }
-
-  // Register slash commands at the end
-  console.log("🔄 Registering slash commands...");
-  try {
-    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
-    console.log("✅ Slash commands registered successfully!");
+  
   } catch (error) {
-    console.error("❌ Command registration error:", error);
+    console.error("❌ READY EVENT ERROR:", error);
   }
 });
 
@@ -603,6 +595,21 @@ async function connectMongo() {
 await connectMongo();
 
 client.login(DISCORD_BOT_TOKEN);
+
+// Register slash commands after login (same pattern as MongoDB)
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log("🔄 Registering slash commands...");
+  try {
+    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
+    await rest.put(
+      Routes.applicationCommands(readyClient.user.id),
+      { body: commands }
+    );
+    console.log("✅ Slash commands registered successfully!");
+  } catch (error) {
+    console.error("❌ Command registration error:", error);
+  }
+});
 
 // === KEEP-ALIVE WEB SERVER FOR RENDER ===
 const PORT = process.env.PORT || 3000;
