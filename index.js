@@ -72,6 +72,19 @@ const commands = [
     .addUserOption(option =>
       option.setName("user")
         .setDescription("User to assign as ticket creator (required for assign)")
+    ),
+  new SlashCommandBuilder()
+    .setName("reset")
+    .setDescription("Reset the current ticket (reminder count and timer)"),
+  new SlashCommandBuilder()
+    .setName("cleanup")
+    .setDescription("Delete old tickets from database")
+    .addIntegerOption(option =>
+      option.setName("days")
+        .setDescription("Delete tickets older than this many days")
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(365)
     )
 ].map(cmd => cmd.toJSON());
 
@@ -132,6 +145,15 @@ async function sendReminder(channel) {
   ticket.reminderCount = (ticket.reminderCount || 0) + 1;
   await ticket.save();
   
+  // Stop sending reminders after 3
+  if (ticket.reminderCount > 3) {
+    const timer = timers.get(channel.id);
+    if (timer?.repeat) {
+      clearInterval(timer.repeat);
+    }
+    return;
+  }
+  
   // Different message for final reminder (3rd one)
   const isFinalReminder = ticket.reminderCount === 3;
   
@@ -152,6 +174,14 @@ async function sendReminder(channel) {
   
   channel.send({ embeds: [embed] }).catch(() => {});
   log(`🔔 Reminder #${ticket.reminderCount} sent in ${channel}`, channel.guild);
+  
+  // After 3rd reminder, stop the interval
+  if (ticket.reminderCount === 3) {
+    const timer = timers.get(channel.id);
+    if (timer?.repeat) {
+      clearInterval(timer.repeat);
+    }
+  }
 }
 
 // --- SEND STAFF ALERT ---
@@ -467,6 +497,63 @@ client.on("interactionCreate", async interaction => {
       });
       log(`✏️ **Ticket creator manually assigned** to <@${user.id}> in ${channel}`, channel.guild);
     }
+  }
+
+  // === /RESET COMMAND ===
+  if (interaction.commandName === "reset") {
+    const ticket = await Ticket.findOne({ channelId: channel.id });
+    
+    if (!ticket) {
+      return interaction.reply({ 
+        content: "❌ No ticket data found in this channel.", 
+        flags: 64 
+      });
+    }
+
+    // Clear all timers
+    clearAllTimers(channel.id);
+
+    // Reset ticket data
+    ticket.reminderCount = 0;
+    ticket.timerStartTime = null;
+    await ticket.save();
+
+    await interaction.reply({ 
+      content: "🔄 **Ticket reset successfully!**\n\n• Reminder count: 0\n• Timer: Stopped\n• Creator: Unchanged\n\nStaff can now restart the timer.", 
+      flags: 64 
+    });
+    
+    log(`🔄 **Ticket reset** in ${channel}`, channel.guild);
+  }
+
+  // === /CLEANUP COMMAND ===
+  if (interaction.commandName === "cleanup") {
+    const days = interaction.options.getInteger("days");
+    const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
+
+    // Find tickets older than cutoff date
+    const oldTickets = await Ticket.find({
+      timerStartTime: { $lt: cutoffDate, $ne: null }
+    });
+
+    if (oldTickets.length === 0) {
+      return interaction.reply({ 
+        content: `✅ No tickets found older than ${days} days.`, 
+        flags: 64 
+      });
+    }
+
+    // Delete old tickets
+    const result = await Ticket.deleteMany({
+      timerStartTime: { $lt: cutoffDate, $ne: null }
+    });
+
+    await interaction.reply({ 
+      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} tickets older than ${days} days\n• Database storage freed up`, 
+      flags: 64 
+    });
+
+    log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets older than ${days} days`, channel.guild);
   }
 });
 
