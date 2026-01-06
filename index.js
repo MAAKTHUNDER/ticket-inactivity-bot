@@ -341,6 +341,78 @@ client.on("messageCreate", async message => {
   }
 });
 
+// --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
+client.on("messageCreate", async message => {
+  // Only process messages in transcript channel
+  if (message.channel.id !== "1434572621084754042") return;
+  
+  // Only process messages from Ticket Tool bot
+  if (message.author.id !== "557628352828014614") return;
+  
+  // Check if message has HTML attachment
+  const htmlAttachment = message.attachments.find(att => att.name.endsWith('.html'));
+  if (!htmlAttachment) return;
+  
+  try {
+    // Extract ticket channel ID from embed or content
+    let ticketChannelId = null;
+    
+    // Try to find channel mention in embed fields
+    if (message.embeds && message.embeds.length > 0) {
+      const embed = message.embeds[0];
+      if (embed.fields) {
+        for (const field of embed.fields) {
+          // Look for channel ID in field values
+          const channelMatch = field.value.match(/<#(\d+)>/);
+          if (channelMatch) {
+            ticketChannelId = channelMatch[1];
+            break;
+          }
+        }
+      }
+      // Also check description
+      if (!ticketChannelId && embed.description) {
+        const channelMatch = embed.description.match(/<#(\d+)>/);
+        if (channelMatch) {
+          ticketChannelId = channelMatch[1];
+        }
+      }
+    }
+    
+    // If we found the ticket channel ID, look up the creator
+    if (ticketChannelId) {
+      const ticket = await Ticket.findOne({ channelId: ticketChannelId });
+      
+      if (ticket && ticket.creatorId) {
+        // Try to fetch the creator user
+        const creator = await client.users.fetch(ticket.creatorId).catch(() => null);
+        
+        if (creator) {
+          // Download the HTML file
+          const response = await fetch(htmlAttachment.url);
+          const buffer = await response.arrayBuffer();
+          
+          // Send DM to creator
+          await creator.send({
+            content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\nThank you for contacting support!`,
+            files: [{
+              attachment: Buffer.from(buffer),
+              name: htmlAttachment.name
+            }]
+          }).catch(err => {
+            console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
+          });
+          
+          console.log(`📋 Transcript sent to ${creator.tag} (${ticket.creatorId})`);
+          log(`📋 **Transcript sent** to <@${ticket.creatorId}>`, message.guild);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error handling transcript:", error);
+  }
+});
+
 // --- SLASH COMMAND HANDLER ---
 client.on("interactionCreate", async interaction => {
   if (!interaction.isCommand()) return;
