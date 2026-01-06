@@ -22,7 +22,8 @@ const {
   KING_ROLE_ID,
   LOG_CHANNEL_ID,
   TICKET_TOOL_BOT_ID,
-  MONGODB_URI
+  MONGODB_URI,
+  TRANSCRIPT_CHANNEL_ID
 } = process.env;
 
 const START_DELAY = 10 * 60 * 1000; // 10 min start after KING/Staff message
@@ -344,7 +345,7 @@ client.on("messageCreate", async message => {
 // --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
 client.on("messageCreate", async message => {
   // Only process messages in transcript channel
-  if (message.channel.id !== "1434572621084754042") return;
+  if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
   
   // Only process messages from Ticket Tool bot
   if (message.author.id !== "557628352828014614") return;
