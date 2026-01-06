@@ -355,27 +355,36 @@ client.on("messageCreate", async message => {
   if (!htmlAttachment) return;
   
   try {
-    // Extract ticket channel ID from embed or content
+    // Extract ticket channel ID from message content or embed
     let ticketChannelId = null;
     
-    // Try to find channel mention in embed fields
-    if (message.embeds && message.embeds.length > 0) {
+    // First, try to find channel ID in message content (Server-Info block)
+    if (message.content) {
+      // Look for pattern: Channel: closed-XXXX (CHANNEL_ID)
+      const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
+      if (contentMatch) {
+        ticketChannelId = contentMatch[1];
+      }
+    }
+    
+    // If not found in content, try embed fields
+    if (!ticketChannelId && message.embeds && message.embeds.length > 0) {
       const embed = message.embeds[0];
       if (embed.fields) {
         for (const field of embed.fields) {
           // Look for channel ID in field values
-          const channelMatch = field.value.match(/<#(\d+)>/);
+          const channelMatch = field.value.match(/<#(\d+)>|(\d{17,19})/);
           if (channelMatch) {
-            ticketChannelId = channelMatch[1];
+            ticketChannelId = channelMatch[1] || channelMatch[2];
             break;
           }
         }
       }
       // Also check description
       if (!ticketChannelId && embed.description) {
-        const channelMatch = embed.description.match(/<#(\d+)>/);
+        const channelMatch = embed.description.match(/<#(\d+)>|(\d{17,19})/);
         if (channelMatch) {
-          ticketChannelId = channelMatch[1];
+          ticketChannelId = channelMatch[1] || channelMatch[2];
         }
       }
     }
