@@ -344,6 +344,8 @@ client.on("messageCreate", async message => {
 
 // --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
 client.on("messageCreate", async message => {
+  console.log("🔍 TRANSCRIPT HANDLER v3 - Checking message..."); // Version identifier
+  
   // Only process messages in transcript channel
   if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
   
@@ -367,69 +369,71 @@ client.on("messageCreate", async message => {
   console.log(`✅ HTML attachment found: ${htmlAttachment.name}`);
   
   try {
-    // Extract ticket channel ID from message content or embed
-    let ticketChannelId = null;
+    // Extract creator ID from embed (Ticket Owner field)
+    let creatorId = null;
     
-    // First, try to find channel ID in message content (Server-Info block)
-    if (message.content) {
-      // Look for pattern: Channel: closed-XXXX (CHANNEL_ID)
-      const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
-      if (contentMatch) {
-        ticketChannelId = contentMatch[1];
-        console.log(`✅ Found channel ID in content: ${ticketChannelId}`);
-      }
-    }
-    
-    // If not found in content, try embed fields
-    if (!ticketChannelId && message.embeds && message.embeds.length > 0) {
+    // Look for Ticket Owner in embed fields
+    if (message.embeds && message.embeds.length > 0) {
       const embed = message.embeds[0];
       if (embed.fields) {
         for (const field of embed.fields) {
-          // Look for channel ID in field values
-          const channelMatch = field.value.match(/<#(\d+)>|(\d{17,19})/);
-          if (channelMatch) {
-            ticketChannelId = channelMatch[1] || channelMatch[2];
-            console.log(`✅ Found channel ID in embed field: ${ticketChannelId}`);
+          if (field.name === "Ticket Owner") {
+            // Extract user ID from mention: @MAAKTHUNDER or <@123456789>
+            const userMatch = field.value.match(/<@!?(\d+)>|@(\w+)/);
+            if (userMatch) {
+              // If we found a mention with ID, use it
+              if (userMatch[1]) {
+                creatorId = userMatch[1];
+                console.log(`✅ Found creator ID from mention: ${creatorId}`);
+              } else {
+                // If we found @username, we need to look it up
+                console.log(`⚠️ Found username but no ID: ${userMatch[2]}`);
+              }
+            }
             break;
           }
         }
       }
-      // Also check description
-      if (!ticketChannelId && embed.description) {
-        const channelMatch = embed.description.match(/<#(\d+)>|(\d{17,19})/);
-        if (channelMatch) {
-          ticketChannelId = channelMatch[1] || channelMatch[2];
-          console.log(`✅ Found channel ID in embed description: ${ticketChannelId}`);
+    }
+    
+    // Fallback: try to find ticket in database by channel ID
+    if (!creatorId) {
+      console.log("⚠️ Could not find creator in embed, trying database lookup...");
+      
+      let ticketChannelId = null;
+      
+      // Try to find channel ID in message content (Server-Info block)
+      if (message.content) {
+        const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
+        if (contentMatch) {
+          ticketChannelId = contentMatch[1];
+          console.log(`✅ Found channel ID in content: ${ticketChannelId}`);
+        }
+      }
+      
+      if (ticketChannelId) {
+        console.log(`🔍 Looking up ticket in database: ${ticketChannelId}`);
+        const ticket = await Ticket.findOne({ channelId: ticketChannelId });
+        
+        if (ticket && ticket.creatorId) {
+          creatorId = ticket.creatorId;
+          console.log(`✅ Found creator from database: ${creatorId}`);
+        } else {
+          console.log(`❌ No ticket found in database for channel ${ticketChannelId}`);
         }
       }
     }
     
-    if (!ticketChannelId) {
-      console.log("❌ Could not extract ticket channel ID from message");
-      return;
-    }
-    
-    // If we found the ticket channel ID, look up the creator
-    console.log(`🔍 Looking up ticket in database: ${ticketChannelId}`);
-    const ticket = await Ticket.findOne({ channelId: ticketChannelId });
-    
-    if (!ticket) {
-      console.log(`❌ No ticket found in database for channel ${ticketChannelId}`);
-      return;
-    }
-    
-    console.log(`✅ Ticket found! Creator: ${ticket.creatorId}`);
-    
-    if (!ticket.creatorId) {
-      console.log("❌ Ticket has no creator ID");
+    if (!creatorId) {
+      console.log("❌ Could not find creator ID");
       return;
     }
     
     // Try to fetch the creator user
-    const creator = await client.users.fetch(ticket.creatorId).catch(() => null);
+    const creator = await client.users.fetch(creatorId).catch(() => null);
     
     if (!creator) {
-      console.log(`❌ Could not fetch user ${ticket.creatorId}`);
+      console.log(`❌ Could not fetch user ${creatorId}`);
       return;
     }
     
@@ -453,8 +457,8 @@ client.on("messageCreate", async message => {
       console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
     });
     
-    console.log(`✅ Transcript sent successfully to ${creator.tag} (${ticket.creatorId})`);
-    log(`📋 **Transcript sent** to <@${ticket.creatorId}>`, message.guild);
+    console.log(`✅ Transcript sent successfully to ${creator.tag} (${creatorId})`);
+    log(`📋 **Transcript sent** to <@${creatorId}>`, message.guild);
     
   } catch (error) {
     console.error("❌ Error handling transcript:", error);
