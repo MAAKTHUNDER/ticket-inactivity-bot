@@ -649,29 +649,49 @@ client.on("interactionCreate", async interaction => {
     const days = interaction.options.getInteger("days");
     const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
 
-    // Find tickets older than cutoff date
-    const oldTickets = await Ticket.find({
-      timerStartTime: { $lt: cutoffDate, $ne: null }
-    });
+    // Find all tickets to check
+    const allTickets = await Ticket.find({});
+    let deletedCount = 0;
+    const ticketsToDelete = [];
 
-    if (oldTickets.length === 0) {
+    for (const ticket of allTickets) {
+      let shouldDelete = false;
+
+      // Check if channel still exists
+      const channelExists = await client.channels.fetch(ticket.channelId).catch(() => null);
+      if (!channelExists) {
+        shouldDelete = true;
+        console.log(`🗑️ Channel ${ticket.channelId} no longer exists`);
+      }
+      // Check if timer is old
+      else if (ticket.timerStartTime && ticket.timerStartTime < cutoffDate) {
+        shouldDelete = true;
+        console.log(`🗑️ Ticket ${ticket.channelId} timer older than ${days} days`);
+      }
+
+      if (shouldDelete) {
+        ticketsToDelete.push(ticket.channelId);
+      }
+    }
+
+    if (ticketsToDelete.length === 0) {
       return interaction.reply({ 
-        content: `✅ No tickets found older than ${days} days.`, 
+        content: `✅ **No cleanup needed!**\n\n• No tickets older than ${days} days\n• No deleted channels found\n• Database is clean`, 
         flags: 64 
       });
     }
 
-    // Delete old tickets
+    // Delete the tickets
     const result = await Ticket.deleteMany({
-      timerStartTime: { $lt: cutoffDate, $ne: null }
+      channelId: { $in: ticketsToDelete }
     });
 
     await interaction.reply({ 
-      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} tickets older than ${days} days\n• Database storage freed up`, 
+      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} old tickets\n• Removed tickets from deleted channels\n• Database storage freed up`, 
       flags: 64 
     });
 
-    log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets older than ${days} days`, channel.guild);
+    log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets`, channel.guild);
   }
 });
 
