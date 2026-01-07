@@ -347,12 +347,24 @@ client.on("messageCreate", async message => {
   // Only process messages in transcript channel
   if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
   
+  console.log("✅ Message detected in transcript channel");
+  
   // Only process messages from Ticket Tool bot
-  if (message.author.id !== "557628352828014614") return;
+  if (message.author.id !== "557628352828014614") {
+    console.log(`❌ Message not from Ticket Tool bot (author: ${message.author.id})`);
+    return;
+  }
+  
+  console.log("✅ Message is from Ticket Tool bot");
   
   // Check if message has HTML attachment
   const htmlAttachment = message.attachments.find(att => att.name.endsWith('.html'));
-  if (!htmlAttachment) return;
+  if (!htmlAttachment) {
+    console.log("❌ No HTML attachment found");
+    return;
+  }
+  
+  console.log(`✅ HTML attachment found: ${htmlAttachment.name}`);
   
   try {
     // Extract ticket channel ID from message content or embed
@@ -364,6 +376,7 @@ client.on("messageCreate", async message => {
       const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
       if (contentMatch) {
         ticketChannelId = contentMatch[1];
+        console.log(`✅ Found channel ID in content: ${ticketChannelId}`);
       }
     }
     
@@ -376,6 +389,7 @@ client.on("messageCreate", async message => {
           const channelMatch = field.value.match(/<#(\d+)>|(\d{17,19})/);
           if (channelMatch) {
             ticketChannelId = channelMatch[1] || channelMatch[2];
+            console.log(`✅ Found channel ID in embed field: ${ticketChannelId}`);
             break;
           }
         }
@@ -385,39 +399,63 @@ client.on("messageCreate", async message => {
         const channelMatch = embed.description.match(/<#(\d+)>|(\d{17,19})/);
         if (channelMatch) {
           ticketChannelId = channelMatch[1] || channelMatch[2];
+          console.log(`✅ Found channel ID in embed description: ${ticketChannelId}`);
         }
       }
     }
     
-    // If we found the ticket channel ID, look up the creator
-    if (ticketChannelId) {
-      const ticket = await Ticket.findOne({ channelId: ticketChannelId });
-      
-      if (ticket && ticket.creatorId) {
-        // Try to fetch the creator user
-        const creator = await client.users.fetch(ticket.creatorId).catch(() => null);
-        
-        if (creator) {
-          // Download the HTML file
-          const response = await fetch(htmlAttachment.url);
-          const buffer = await response.arrayBuffer();
-          
-          // Send DM to creator
-          await creator.send({
-            content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\nThank you for contacting support!`,
-            files: [{
-              attachment: Buffer.from(buffer),
-              name: htmlAttachment.name
-            }]
-          }).catch(err => {
-            console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
-          });
-          
-          console.log(`📋 Transcript sent to ${creator.tag} (${ticket.creatorId})`);
-          log(`📋 **Transcript sent** to <@${ticket.creatorId}>`, message.guild);
-        }
-      }
+    if (!ticketChannelId) {
+      console.log("❌ Could not extract ticket channel ID from message");
+      return;
     }
+    
+    // If we found the ticket channel ID, look up the creator
+    console.log(`🔍 Looking up ticket in database: ${ticketChannelId}`);
+    const ticket = await Ticket.findOne({ channelId: ticketChannelId });
+    
+    if (!ticket) {
+      console.log(`❌ No ticket found in database for channel ${ticketChannelId}`);
+      return;
+    }
+    
+    console.log(`✅ Ticket found! Creator: ${ticket.creatorId}`);
+    
+    if (!ticket.creatorId) {
+      console.log("❌ Ticket has no creator ID");
+      return;
+    }
+    
+    // Try to fetch the creator user
+    const creator = await client.users.fetch(ticket.creatorId).catch(() => null);
+    
+    if (!creator) {
+      console.log(`❌ Could not fetch user ${ticket.creatorId}`);
+      return;
+    }
+    
+    console.log(`✅ Creator fetched: ${creator.tag}`);
+    
+    // Download the HTML file
+    console.log(`📥 Downloading transcript: ${htmlAttachment.url}`);
+    const response = await fetch(htmlAttachment.url);
+    const buffer = await response.arrayBuffer();
+    console.log(`✅ Transcript downloaded (${buffer.byteLength} bytes)`);
+    
+    // Send DM to creator
+    console.log(`📨 Sending DM to ${creator.tag}...`);
+    await creator.send({
+      content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\nThank you for contacting support!`,
+      files: [{
+        attachment: Buffer.from(buffer),
+        name: htmlAttachment.name
+      }]
+    }).catch(err => {
+      console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
+    });
+    
+    console.log(`✅ Transcript sent successfully to ${creator.tag} (${ticket.creatorId})`);
+    log(`📋 **Transcript sent** to <@${ticket.creatorId}>`, message.guild);
+    
   } catch (error) {
     console.error("❌ Error handling transcript:", error);
   }
