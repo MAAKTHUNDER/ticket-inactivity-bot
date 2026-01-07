@@ -86,7 +86,10 @@ const commands = [
         .setRequired(true)
         .setMinValue(1)
         .setMaxValue(365)
-    )
+    ),
+  new SlashCommandBuilder()
+    .setName("cleanup-all")
+    .setDescription("Wipe all tickets from database (including deleted channels)")
 ].map(cmd => cmd.toJSON());
 
 // --- LOG HELPER ---
@@ -692,6 +695,30 @@ client.on("interactionCreate", async interaction => {
     });
 
     log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets`, channel.guild);
+  }
+
+  // === /CLEANUP-ALL COMMAND ===
+  if (interaction.commandName === "cleanup-all") {
+    // Get total count before deleting
+    const totalTickets = await Ticket.countDocuments();
+
+    if (totalTickets === 0) {
+      return interaction.reply({ 
+        content: `✅ **Database is already empty!**\n\n• No tickets to clean up\n• Database is clean`, 
+        flags: 64 
+      });
+    }
+
+    // Delete ALL tickets - no checks, just wipe everything
+    const result = await Ticket.deleteMany({});
+
+    await interaction.reply({ 
+      content: `🗑️ **Complete Database Wipe!**\n\n• Deleted **${result.deletedCount}** tickets\n• All ticket data removed\n• Database completely cleaned`, 
+      flags: 64 
+    });
+
+    console.log(`🗑️ CLEANUP-ALL: Wiped entire database (${result.deletedCount} tickets)`);
+    log(`🗑️ **Cleanup-All:** Wiped database - deleted ${result.deletedCount} tickets`, channel.guild);
   }
 });
 
