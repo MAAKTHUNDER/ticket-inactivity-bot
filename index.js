@@ -448,7 +448,7 @@ client.on("messageCreate", async message => {
     // Send DM to creator
     console.log(`📨 Sending DM to ${creator.tag}...`);
     await creator.send({
-      content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\nThank you for contacting support!`,
+      content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\n**📥 How to view:**\n• Download the HTML file attached below\n• Open it in your browser to see the full transcript\n\nThank you for contacting support!`,
       files: [{
         attachment: Buffer.from(buffer),
         name: htmlAttachment.name
