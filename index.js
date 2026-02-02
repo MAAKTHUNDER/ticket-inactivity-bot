@@ -347,29 +347,15 @@ client.on("messageCreate", async message => {
 
 // --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
 client.on("messageCreate", async message => {
-  console.log("🔍 TRANSCRIPT HANDLER v3 - Checking message..."); // Version identifier
-  
   // Only process messages in transcript channel
   if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
   
-  console.log("✅ Message detected in transcript channel");
-  
   // Only process messages from Ticket Tool bot
-  if (message.author.id !== "557628352828014614") {
-    console.log(`❌ Message not from Ticket Tool bot (author: ${message.author.id})`);
-    return;
-  }
-  
-  console.log("✅ Message is from Ticket Tool bot");
+  if (message.author.id !== "557628352828014614") return;
   
   // Check if message has HTML attachment
   const htmlAttachment = message.attachments.find(att => att.name.endsWith('.html'));
-  if (!htmlAttachment) {
-    console.log("❌ No HTML attachment found");
-    return;
-  }
-  
-  console.log(`✅ HTML attachment found: ${htmlAttachment.name}`);
+  if (!htmlAttachment) return;
   
   try {
     // Extract creator ID from embed (Ticket Owner field)
@@ -381,17 +367,10 @@ client.on("messageCreate", async message => {
       if (embed.fields) {
         for (const field of embed.fields) {
           if (field.name === "Ticket Owner") {
-            // Extract user ID from mention: @MAAKTHUNDER or <@123456789>
-            const userMatch = field.value.match(/<@!?(\d+)>|@(\w+)/);
-            if (userMatch) {
-              // If we found a mention with ID, use it
-              if (userMatch[1]) {
-                creatorId = userMatch[1];
-                console.log(`✅ Found creator ID from mention: ${creatorId}`);
-              } else {
-                // If we found @username, we need to look it up
-                console.log(`⚠️ Found username but no ID: ${userMatch[2]}`);
-              }
+            // Extract user ID from mention
+            const userMatch = field.value.match(/<@!?(\d+)>/);
+            if (userMatch && userMatch[1]) {
+              creatorId = userMatch[1];
             }
             break;
           }
@@ -399,57 +378,26 @@ client.on("messageCreate", async message => {
       }
     }
     
-    // Fallback: try to find ticket in database by channel ID
-    if (!creatorId) {
-      console.log("⚠️ Could not find creator in embed, trying database lookup...");
-      
-      let ticketChannelId = null;
-      
-      // Try to find channel ID in message content (Server-Info block)
-      if (message.content) {
-        const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
-        if (contentMatch) {
-          ticketChannelId = contentMatch[1];
-          console.log(`✅ Found channel ID in content: ${ticketChannelId}`);
-        }
-      }
-      
-      if (ticketChannelId) {
-        console.log(`🔍 Looking up ticket in database: ${ticketChannelId}`);
-        const ticket = await Ticket.findOne({ channelId: ticketChannelId });
-        
+    // Fallback: try database lookup
+    if (!creatorId && message.content) {
+      const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
+      if (contentMatch) {
+        const ticket = await Ticket.findOne({ channelId: contentMatch[1] });
         if (ticket && ticket.creatorId) {
           creatorId = ticket.creatorId;
-          console.log(`✅ Found creator from database: ${creatorId}`);
-        } else {
-          console.log(`❌ No ticket found in database for channel ${ticketChannelId}`);
         }
       }
     }
     
-    if (!creatorId) {
-      console.log("❌ Could not find creator ID");
-      return;
-    }
+    if (!creatorId) return;
     
-    // Try to fetch the creator user
+    // Fetch creator and send DM
     const creator = await client.users.fetch(creatorId).catch(() => null);
+    if (!creator) return;
     
-    if (!creator) {
-      console.log(`❌ Could not fetch user ${creatorId}`);
-      return;
-    }
-    
-    console.log(`✅ Creator fetched: ${creator.tag}`);
-    
-    // Download the HTML file
-    console.log(`📥 Downloading transcript: ${htmlAttachment.url}`);
     const response = await fetch(htmlAttachment.url);
     const buffer = await response.arrayBuffer();
-    console.log(`✅ Transcript downloaded (${buffer.byteLength} bytes)`);
     
-    // Send DM to creator
-    console.log(`📨 Sending DM to ${creator.tag}...`);
     await creator.send({
       content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\n**📥 How to view:**\n• Download the HTML file attached below\n• Open it in your browser to see the full transcript\n\nThank you for contacting support!`,
       files: [{
@@ -457,14 +405,13 @@ client.on("messageCreate", async message => {
         name: htmlAttachment.name
       }]
     }).catch(err => {
-      console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
+      console.log(`⚠️ Could not send transcript DM: ${err.message}`);
     });
     
-    console.log(`✅ Transcript sent successfully to ${creator.tag} (${creatorId})`);
-    log(`📋 **Transcript sent** to <@${creatorId}>`, message.guild);
+    console.log(`📋 Transcript sent to ${creator.tag}`);
     
   } catch (error) {
-    console.error("❌ Error handling transcript:", error);
+    console.error("❌ Transcript handler error:", error);
   }
 });
 
@@ -654,7 +601,6 @@ client.on("interactionCreate", async interaction => {
 
     // Find all tickets to check
     const allTickets = await Ticket.find({});
-    let deletedCount = 0;
     const ticketsToDelete = [];
 
     for (const ticket of allTickets) {
@@ -664,12 +610,10 @@ client.on("interactionCreate", async interaction => {
       const channelExists = await client.channels.fetch(ticket.channelId).catch(() => null);
       if (!channelExists) {
         shouldDelete = true;
-        console.log(`🗑️ Channel ${ticket.channelId} no longer exists`);
       }
       // Check if timer is old
       else if (ticket.timerStartTime && ticket.timerStartTime < cutoffDate) {
         shouldDelete = true;
-        console.log(`🗑️ Ticket ${ticket.channelId} timer older than ${days} days`);
       }
 
       if (shouldDelete) {
