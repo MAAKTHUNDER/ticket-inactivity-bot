@@ -219,6 +219,70 @@ function getTimeElapsed(startTime) {
   return `${hours}h ${minutes}m`;
 }
 
+// --- READY EVENT (BEFORE LOGIN) ---
+client.once(Events.ClientReady, async () => {
+  try {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+
+    // Load all tickets from MongoDB
+    const tickets = await Ticket.find({});
+    console.log(`✅ Loaded ${tickets.length} tickets from database`);
+
+  // Restore active timers for tickets that had timers running
+  for (const ticket of tickets) {
+    if (ticket.timerStartTime) {
+      const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
+      if (channel) {
+        const elapsed = Date.now() - ticket.timerStartTime;
+        
+        // If less than 24 hours elapsed, restore the timer
+        if (elapsed < STAFF_ALERT_TIME) {
+          const remainingTime = STAFF_ALERT_TIME - elapsed;
+          
+          // Calculate when next reminder should be
+          const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
+          const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
+          
+          const timer = {};
+          
+          // Set up next reminder
+          timer.repeat = setInterval(() => {
+            sendReminder(channel);
+          }, REMINDER_INTERVAL);
+          
+          // Send reminder if it's time
+          if (timeToNextReminder <= 1000) {
+            sendReminder(channel);
+          } else {
+            setTimeout(() => {
+              sendReminder(channel);
+            }, timeToNextReminder);
+          }
+          
+          // Set up staff alert for remaining time
+          timer.staff = setTimeout(() => {
+            sendStaffAlert(channel);
+          }, remainingTime);
+          
+          timers.set(ticket.channelId, timer);
+          
+          console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
+        } else {
+          // Timer expired during downtime, send staff alert now
+          sendStaffAlert(channel);
+        }
+      } else {
+        // Channel doesn't exist anymore, clean up
+        await Ticket.deleteOne({ channelId: ticket.channelId });
+      }
+    }
+  }
+  
+  } catch (error) {
+    console.error("❌ READY EVENT ERROR:", error);
+  }
+});
+
 // --- MESSAGE HANDLER ---
 client.on("messageCreate", async message => {
   if (!message.guild) return;
@@ -287,7 +351,7 @@ client.on("messageCreate", async message => {
   }
 });
 
-// --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
+// --- TRANSCRIPT HANDLER (Send to Creator's DM) - DEBUG LOGS REMOVED ---
 client.on("messageCreate", async message => {
   // Only process messages in transcript channel
   if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
@@ -375,7 +439,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /TIMER COMMAND ===
   if (interaction.commandName === "timer") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
     
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
@@ -456,7 +520,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CREATOR COMMAND ===
   if (interaction.commandName === "creator") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
     
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
@@ -508,7 +572,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /RESET COMMAND ===
   if (interaction.commandName === "reset") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
     
     const ticket = await Ticket.findOne({ channelId: channel.id });
     
@@ -535,7 +599,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP COMMAND ===
   if (interaction.commandName === "cleanup") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
     
     const days = interaction.options.getInteger("days");
     const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
@@ -582,7 +646,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP-ALL COMMAND ===
   if (interaction.commandName === "cleanup-all") {
-    await interaction.deferReply({ flags: 64 });
+    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
     
     // Get total count before deleting
     const totalTickets = await Ticket.countDocuments();
@@ -650,71 +714,7 @@ await connectMongo();
 
 client.login(DISCORD_BOT_TOKEN);
 
-// --- READY EVENT (Load tickets and restore timers) ---
-client.once(Events.ClientReady, async () => {
-  try {
-    console.log(`✅ Logged in as ${client.user.tag}`);
-
-    // Load all tickets from MongoDB
-    const tickets = await Ticket.find({});
-    console.log(`✅ Loaded ${tickets.length} tickets from database`);
-
-  // Restore active timers for tickets that had timers running
-  for (const ticket of tickets) {
-    if (ticket.timerStartTime) {
-      const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
-      if (channel) {
-        const elapsed = Date.now() - ticket.timerStartTime;
-        
-        // If less than 24 hours elapsed, restore the timer
-        if (elapsed < STAFF_ALERT_TIME) {
-          const remainingTime = STAFF_ALERT_TIME - elapsed;
-          
-          // Calculate when next reminder should be
-          const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
-          const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
-          
-          const timer = {};
-          
-          // Set up next reminder
-          timer.repeat = setInterval(() => {
-            sendReminder(channel);
-          }, REMINDER_INTERVAL);
-          
-          // Send reminder if it's time
-          if (timeToNextReminder <= 1000) {
-            sendReminder(channel);
-          } else {
-            setTimeout(() => {
-              sendReminder(channel);
-            }, timeToNextReminder);
-          }
-          
-          // Set up staff alert for remaining time
-          timer.staff = setTimeout(() => {
-            sendStaffAlert(channel);
-          }, remainingTime);
-          
-          timers.set(ticket.channelId, timer);
-          
-          console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
-        } else {
-          // Timer expired during downtime, send staff alert now
-          sendStaffAlert(channel);
-        }
-      } else {
-        // Channel doesn't exist anymore, clean up
-        await Ticket.deleteOne({ channelId: ticket.channelId });
-      }
-    }
-  }
-  
-  } catch (error) {
-    console.error("❌ READY EVENT ERROR:", error);
-  }
-});
-
-// Register slash commands after login (separate ready event pattern)
+// Register slash commands after login (SEPARATE READY EVENT AFTER LOGIN)
 client.once(Events.ClientReady, async (readyClient) => {
   console.log("🔄 Registering slash commands...");
   try {
