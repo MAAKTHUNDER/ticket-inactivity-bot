@@ -415,6 +415,7 @@ client.on("messageCreate", async message => {
     });
     
     console.log(`📋 Transcript sent to ${creator.tag}`);
+    log(`📋 **Transcript sent** to <@${creatorId}>`, message.guild);
     
   } catch (error) {
     console.error("❌ Transcript handler error:", error);
@@ -438,7 +439,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /TIMER COMMAND ===
   if (interaction.commandName === "timer") {
-    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    await interaction.deferReply({ flags: 64 });
     
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
@@ -519,7 +520,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CREATOR COMMAND ===
   if (interaction.commandName === "creator") {
-    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    await interaction.deferReply({ flags: 64 });
     
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
@@ -571,7 +572,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /RESET COMMAND ===
   if (interaction.commandName === "reset") {
-    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    await interaction.deferReply({ flags: 64 });
     
     const ticket = await Ticket.findOne({ channelId: channel.id });
     
@@ -598,7 +599,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP COMMAND ===
   if (interaction.commandName === "cleanup") {
-    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    await interaction.deferReply({ flags: 64 });
     
     const days = interaction.options.getInteger("days");
     const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
@@ -645,7 +646,7 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP-ALL COMMAND ===
   if (interaction.commandName === "cleanup-all") {
-    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    await interaction.deferReply({ flags: 64 });
     
     // Get total count before deleting
     const totalTickets = await Ticket.countDocuments();
