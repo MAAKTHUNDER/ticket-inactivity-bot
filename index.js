@@ -219,83 +219,6 @@ function getTimeElapsed(startTime) {
   return `${hours}h ${minutes}m`;
 }
 
-// --- READY EVENT ---
-client.once(Events.ClientReady, async () => {
-  try {
-    console.log(`✅ Logged in as ${client.user.tag}`);
-
-    // Load all tickets from MongoDB
-    const tickets = await Ticket.find({});
-    console.log(`✅ Loaded ${tickets.length} tickets from database`);
-
-  // Restore active timers for tickets that had timers running
-  for (const ticket of tickets) {
-    if (ticket.timerStartTime) {
-      const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
-      if (channel) {
-        const elapsed = Date.now() - ticket.timerStartTime;
-        
-        // If less than 24 hours elapsed, restore the timer
-        if (elapsed < STAFF_ALERT_TIME) {
-          const remainingTime = STAFF_ALERT_TIME - elapsed;
-          
-          // Calculate when next reminder should be
-          const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
-          const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
-          
-          const timer = {};
-          
-          // Set up next reminder
-          timer.repeat = setInterval(() => {
-            sendReminder(channel);
-          }, REMINDER_INTERVAL);
-          
-          // Send reminder if it's time
-          if (timeToNextReminder <= 1000) {
-            sendReminder(channel);
-          } else {
-            setTimeout(() => {
-              sendReminder(channel);
-            }, timeToNextReminder);
-          }
-          
-          // Set up staff alert for remaining time
-          timer.staff = setTimeout(() => {
-            sendStaffAlert(channel);
-          }, remainingTime);
-          
-          timers.set(ticket.channelId, timer);
-          
-          console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
-        } else {
-          // Timer expired during downtime, send staff alert now
-          sendStaffAlert(channel);
-        }
-      } else {
-        // Channel doesn't exist anymore, clean up
-        await Ticket.deleteOne({ channelId: ticket.channelId });
-      }
-    }
-  }
-
-  // Register slash commands
-  console.log("🔄 Registering slash commands...");
-  try {
-    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
-    console.log("✅ Slash commands registered successfully!");
-  } catch (error) {
-    console.error("❌ Command registration error:", error);
-  }
-  
-  } catch (error) {
-    console.error("❌ READY EVENT ERROR:", error);
-  }
-});
-
 // --- MESSAGE HANDLER ---
 client.on("messageCreate", async message => {
   if (!message.guild) return;
@@ -726,6 +649,85 @@ async function connectMongo() {
 await connectMongo();
 
 client.login(DISCORD_BOT_TOKEN);
+
+// --- READY EVENT (Load tickets and restore timers) ---
+client.once(Events.ClientReady, async () => {
+  try {
+    console.log(`✅ Logged in as ${client.user.tag}`);
+
+    // Load all tickets from MongoDB
+    const tickets = await Ticket.find({});
+    console.log(`✅ Loaded ${tickets.length} tickets from database`);
+
+  // Restore active timers for tickets that had timers running
+  for (const ticket of tickets) {
+    if (ticket.timerStartTime) {
+      const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
+      if (channel) {
+        const elapsed = Date.now() - ticket.timerStartTime;
+        
+        // If less than 24 hours elapsed, restore the timer
+        if (elapsed < STAFF_ALERT_TIME) {
+          const remainingTime = STAFF_ALERT_TIME - elapsed;
+          
+          // Calculate when next reminder should be
+          const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
+          const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
+          
+          const timer = {};
+          
+          // Set up next reminder
+          timer.repeat = setInterval(() => {
+            sendReminder(channel);
+          }, REMINDER_INTERVAL);
+          
+          // Send reminder if it's time
+          if (timeToNextReminder <= 1000) {
+            sendReminder(channel);
+          } else {
+            setTimeout(() => {
+              sendReminder(channel);
+            }, timeToNextReminder);
+          }
+          
+          // Set up staff alert for remaining time
+          timer.staff = setTimeout(() => {
+            sendStaffAlert(channel);
+          }, remainingTime);
+          
+          timers.set(ticket.channelId, timer);
+          
+          console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
+        } else {
+          // Timer expired during downtime, send staff alert now
+          sendStaffAlert(channel);
+        }
+      } else {
+        // Channel doesn't exist anymore, clean up
+        await Ticket.deleteOne({ channelId: ticket.channelId });
+      }
+    }
+  }
+  
+  } catch (error) {
+    console.error("❌ READY EVENT ERROR:", error);
+  }
+});
+
+// Register slash commands after login (separate ready event pattern)
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log("🔄 Registering slash commands...");
+  try {
+    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
+    await rest.put(
+      Routes.applicationCommands(readyClient.user.id),
+      { body: commands }
+    );
+    console.log("✅ Slash commands registered successfully!");
+  } catch (error) {
+    console.error("❌ Command registration error:", error);
+  }
+});
 
 // === KEEP-ALIVE WEB SERVER FOR RENDER ===
 const PORT = process.env.PORT || 3000;
