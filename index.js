@@ -95,13 +95,7 @@ const commands = [
 // --- LOG HELPER ---
 function log(message, guild) {
   const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
-  if (!channel) {
-    console.error(`⚠️ Log channel not found: ${LOG_CHANNEL_ID}`);
-    return;
-  }
-  channel.send(message).catch(err => {
-    console.error(`⚠️ Failed to send log message: ${err.message}`);
-  });
+  if (channel) channel.send(message).catch(() => {});
 }
 
 // --- CLEAR TIMERS ---
@@ -129,7 +123,7 @@ async function startTimers(channel) {
     ticket.timerStartTime = Date.now();
     ticket.reminderCount = 0;
     await ticket.save();
-    
+
     log(`⏱️ **Timer started** in ${channel}`, channel.guild);
 
     // Set up reminder interval (first reminder at 6 hours, then every 6 hours)
@@ -151,10 +145,10 @@ async function startTimers(channel) {
 async function sendReminder(channel) {
   const ticket = await Ticket.findOne({ channelId: channel.id });
   if (!ticket) return;
-  
+
   ticket.reminderCount = (ticket.reminderCount || 0) + 1;
   await ticket.save();
-  
+
   // Stop sending reminders after 3
   if (ticket.reminderCount > 3) {
     const timer = timers.get(channel.id);
@@ -163,10 +157,10 @@ async function sendReminder(channel) {
     }
     return;
   }
-  
+
   // Different message for final reminder (3rd one)
   const isFinalReminder = ticket.reminderCount === 3;
-  
+
   const embed = new EmbedBuilder()
     .setColor(isFinalReminder ? "Red" : "Yellow")
     .setTitle(isFinalReminder ? "🔔 Final Ticket Reminder ⚠️" : "🔔 Ticket Reminder")
@@ -181,10 +175,10 @@ async function sendReminder(channel) {
         : `Reminder ${ticket.reminderCount} of 3 • Next reminder in 6 hours` 
     })
     .setTimestamp();
-  
+
   channel.send({ embeds: [embed] }).catch(() => {});
   log(`🔔 Reminder #${ticket.reminderCount} sent in ${channel}`, channel.guild);
-  
+
   // After 3rd reminder, stop the interval
   if (ticket.reminderCount === 3) {
     const timer = timers.get(channel.id);
@@ -203,7 +197,7 @@ async function sendStaffAlert(channel) {
     .setDescription(`<@&${STAFF_ROLE_ID}> <@&${KING_ROLE_ID}>\n\n🚨 **No response from ticket creator** <@${ticket?.creatorId}> **for 24 hours.**\n\nPlease **close and delete** this ticket manually.`)
     .setFooter({ text: "Ticket has been inactive for 24 hours" })
     .setTimestamp();
-  
+
   channel.send({ embeds: [embed] }).catch(() => {});
   log(`⚠️ **24-hour staff alert** sent for ${channel}`, channel.guild);
 }
@@ -211,15 +205,15 @@ async function sendStaffAlert(channel) {
 // --- GET TIME ELAPSED ---
 function getTimeElapsed(startTime) {
   if (!startTime) return "Timer not started";
-  
+
   const elapsed = Date.now() - startTime;
   const hours = Math.floor(elapsed / (60 * 60 * 1000));
   const minutes = Math.floor((elapsed % (60 * 60 * 1000)) / (60 * 1000));
-  
+
   return `${hours}h ${minutes}m`;
 }
 
-// --- READY EVENT (BEFORE LOGIN) ---
+// --- READY EVENT ---
 client.once(Events.ClientReady, async () => {
   try {
     console.log(`✅ Logged in as ${client.user.tag}`);
@@ -234,22 +228,22 @@ client.once(Events.ClientReady, async () => {
       const channel = await client.channels.fetch(ticket.channelId).catch(() => null);
       if (channel) {
         const elapsed = Date.now() - ticket.timerStartTime;
-        
+
         // If less than 24 hours elapsed, restore the timer
         if (elapsed < STAFF_ALERT_TIME) {
           const remainingTime = STAFF_ALERT_TIME - elapsed;
-          
+
           // Calculate when next reminder should be
           const timeSinceLastReminder = elapsed % REMINDER_INTERVAL;
           const timeToNextReminder = REMINDER_INTERVAL - timeSinceLastReminder;
-          
+
           const timer = {};
-          
+
           // Set up next reminder
           timer.repeat = setInterval(() => {
             sendReminder(channel);
           }, REMINDER_INTERVAL);
-          
+
           // Send reminder if it's time
           if (timeToNextReminder <= 1000) {
             sendReminder(channel);
@@ -258,14 +252,14 @@ client.once(Events.ClientReady, async () => {
               sendReminder(channel);
             }, timeToNextReminder);
           }
-          
+
           // Set up staff alert for remaining time
           timer.staff = setTimeout(() => {
             sendStaffAlert(channel);
           }, remainingTime);
-          
+
           timers.set(ticket.channelId, timer);
-          
+
           console.log(`🔄 Restored timer for ticket ${ticket.channelId} (${Math.floor(elapsed / 60000)} minutes elapsed)`);
         } else {
           // Timer expired during downtime, send staff alert now
@@ -277,7 +271,7 @@ client.once(Events.ClientReady, async () => {
       }
     }
   }
-  
+
   } catch (error) {
     console.error("❌ READY EVENT ERROR:", error);
   }
@@ -287,7 +281,7 @@ client.once(Events.ClientReady, async () => {
 client.on("messageCreate", async message => {
   if (!message.guild) return;
   if (message.author.bot && message.author.id !== TICKET_TOOL_BOT_ID) return;
-  
+
   const channel = message.channel;
   if (channel.parentId !== TICKET_CATEGORY_ID) return;
 
@@ -296,7 +290,7 @@ client.on("messageCreate", async message => {
 
   // === TICKET CREATOR DETECTION (Only once when ticket is created) ===
   let ticket = await Ticket.findOne({ channelId: channel.id });
-  
+
   if (!ticket) {
     let creatorId = null;
 
@@ -351,59 +345,111 @@ client.on("messageCreate", async message => {
   }
 });
 
-// --- TRANSCRIPT HANDLER (Send to Creator's DM) - DEBUG LOGS REMOVED ---
+// --- TRANSCRIPT HANDLER (Send to Creator's DM) ---
 client.on("messageCreate", async message => {
+  console.log("🔍 TRANSCRIPT HANDLER v3 - Checking message..."); // Version identifier
+
   // Only process messages in transcript channel
   if (message.channel.id !== process.env.TRANSCRIPT_CHANNEL_ID) return;
-  
+
+  console.log("✅ Message detected in transcript channel");
+
   // Only process messages from Ticket Tool bot
-  if (message.author.id !== "557628352828014614") return;
-  
+  if (message.author.id !== "557628352828014614") {
+    console.log(`❌ Message not from Ticket Tool bot (author: ${message.author.id})`);
+    return;
+  }
+
+  console.log("✅ Message is from Ticket Tool bot");
+
   // Check if message has HTML attachment
   const htmlAttachment = message.attachments.find(att => att.name.endsWith('.html'));
-  if (!htmlAttachment) return;
-  
+  if (!htmlAttachment) {
+    console.log("❌ No HTML attachment found");
+    return;
+  }
+
+  console.log(`✅ HTML attachment found: ${htmlAttachment.name}`);
+
   try {
     // Extract creator ID from embed (Ticket Owner field)
     let creatorId = null;
-    
+
     // Look for Ticket Owner in embed fields
     if (message.embeds && message.embeds.length > 0) {
       const embed = message.embeds[0];
       if (embed.fields) {
         for (const field of embed.fields) {
           if (field.name === "Ticket Owner") {
-            // Extract user ID from mention
-            const userMatch = field.value.match(/<@!?(\d+)>/);
-            if (userMatch && userMatch[1]) {
-              creatorId = userMatch[1];
+            // Extract user ID from mention: @MAAKTHUNDER or <@123456789>
+            const userMatch = field.value.match(/<@!?(\d+)>|@(\w+)/);
+            if (userMatch) {
+              // If we found a mention with ID, use it
+              if (userMatch[1]) {
+                creatorId = userMatch[1];
+                console.log(`✅ Found creator ID from mention: ${creatorId}`);
+              } else {
+                // If we found @username, we need to look it up
+                console.log(`⚠️ Found username but no ID: ${userMatch[2]}`);
+              }
             }
             break;
           }
         }
       }
     }
-    
-    // Fallback: try database lookup
-    if (!creatorId && message.content) {
-      const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
-      if (contentMatch) {
-        const ticket = await Ticket.findOne({ channelId: contentMatch[1] });
+
+    // Fallback: try to find ticket in database by channel ID
+    if (!creatorId) {
+      console.log("⚠️ Could not find creator in embed, trying database lookup...");
+
+      let ticketChannelId = null;
+
+      // Try to find channel ID in message content (Server-Info block)
+      if (message.content) {
+        const contentMatch = message.content.match(/Channel:.*?\((\d{17,19})\)/);
+        if (contentMatch) {
+          ticketChannelId = contentMatch[1];
+          console.log(`✅ Found channel ID in content: ${ticketChannelId}`);
+        }
+      }
+
+      if (ticketChannelId) {
+        console.log(`🔍 Looking up ticket in database: ${ticketChannelId}`);
+        const ticket = await Ticket.findOne({ channelId: ticketChannelId });
+
         if (ticket && ticket.creatorId) {
           creatorId = ticket.creatorId;
+          console.log(`✅ Found creator from database: ${creatorId}`);
+        } else {
+          console.log(`❌ No ticket found in database for channel ${ticketChannelId}`);
         }
       }
     }
-    
-    if (!creatorId) return;
-    
-    // Fetch creator and send DM
+
+    if (!creatorId) {
+      console.log("❌ Could not find creator ID");
+      return;
+    }
+
+    // Try to fetch the creator user
     const creator = await client.users.fetch(creatorId).catch(() => null);
-    if (!creator) return;
-    
+
+    if (!creator) {
+      console.log(`❌ Could not fetch user ${creatorId}`);
+      return;
+    }
+
+    console.log(`✅ Creator fetched: ${creator.tag}`);
+
+    // Download the HTML file
+    console.log(`📥 Downloading transcript: ${htmlAttachment.url}`);
     const response = await fetch(htmlAttachment.url);
     const buffer = await response.arrayBuffer();
-    
+    console.log(`✅ Transcript downloaded (${buffer.byteLength} bytes)`);
+
+    // Send DM to creator
+    console.log(`📨 Sending DM to ${creator.tag}...`);
     await creator.send({
       content: `📋 **Your Ticket Transcript**\n\nYour support ticket has been closed. Here's your conversation transcript for your records.\n\n**📥 How to view:**\n• Download the HTML file attached below\n• Open it in your browser to see the full transcript\n\nThank you for contacting support!`,
       files: [{
@@ -411,25 +457,25 @@ client.on("messageCreate", async message => {
         name: htmlAttachment.name
       }]
     }).catch(err => {
-      console.log(`⚠️ Could not send transcript DM: ${err.message}`);
+      console.log(`⚠️ Could not send transcript to ${creator.tag}: ${err.message}`);
     });
-    
-    console.log(`📋 Transcript sent to ${creator.tag}`);
+
+    console.log(`✅ Transcript sent successfully to ${creator.tag} (${creatorId})`);
     log(`📋 **Transcript sent** to <@${creatorId}>`, message.guild);
-    
+
   } catch (error) {
-    console.error("❌ Transcript handler error:", error);
+    console.error("❌ Error handling transcript:", error);
   }
 });
 
 // --- SLASH COMMAND HANDLER ---
 client.on("interactionCreate", async interaction => {
   if (!interaction.isCommand()) return;
-  
+
   const channel = interaction.channel;
   const member = interaction.member;
   const isStaff = member.roles.cache.has(STAFF_ROLE_ID) || member.roles.cache.has(KING_ROLE_ID);
-  
+
   if (!isStaff) {
     return interaction.reply({ 
       content: "❌ You are not authorized to use this command.", 
@@ -439,72 +485,75 @@ client.on("interactionCreate", async interaction => {
 
   // === /TIMER COMMAND ===
   if (interaction.commandName === "timer") {
-    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
-    
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
 
     switch(action) {
       case "stop":
         if (!ticket || !ticket.timerStartTime) {
-          return interaction.editReply({ 
-            content: "⏹️ No active timer to stop."
+          return interaction.reply({ 
+            content: "⏹️ No active timer to stop.", 
+            flags: 64 
           });
         }
         clearAllTimers(channel.id);
         ticket.timerStartTime = null;
         ticket.reminderCount = 0;
         await ticket.save();
-        await interaction.editReply({ content: "⏹️ **Timer stopped immediately.**" });
+        await interaction.reply({ content: "⏹️ **Timer stopped immediately.**", flags: 64 });
         log(`⏹️ **Timer manually stopped** in ${channel}`, channel.guild);
         break;
 
       case "restart":
         if (!ticket) {
-          return interaction.editReply({ 
-            content: "❌ No ticket data found. Please assign a creator first."
+          return interaction.reply({ 
+            content: "❌ No ticket data found. Please assign a creator first.", 
+            flags: 64 
           });
         }
         clearAllTimers(channel.id);
-        
+
         // Restart timer immediately without 10min delay and WITHOUT sending reminder
         ticket.timerStartTime = Date.now();
         ticket.reminderCount = 0;
         await ticket.save();
-        
+
         const timer = {};
-        
+
         // First reminder will come after 6 hours
         timer.repeat = setInterval(() => {
           sendReminder(channel);
         }, REMINDER_INTERVAL);
-        
+
         // Staff alert after 24 hours
         timer.staff = setTimeout(() => {
           sendStaffAlert(channel);
         }, STAFF_ALERT_TIME);
-        
+
         timers.set(channel.id, timer);
-        
-        await interaction.editReply({ 
-          content: "🔄 **Timer restarted immediately.** First reminder will be sent in 6 hours."
+
+        await interaction.reply({ 
+          content: "🔄 **Timer restarted immediately.** First reminder will be sent in 6 hours.", 
+          flags: 64 
         });
         log(`🔄 **Timer manually restarted** in ${channel}`, channel.guild);
         break;
 
       case "status":
         if (!ticket) {
-          return interaction.editReply({ 
-            content: "❌ No ticket data found."
+          return interaction.reply({ 
+            content: "❌ No ticket data found.", 
+            flags: 64 
           });
         }
-        
+
         if (!ticket.timerStartTime) {
-          return interaction.editReply({ 
-            content: "⏱️ **Timer Status:** Inactive\n\n❌ Timer is not currently running."
+          return interaction.reply({ 
+            content: "⏱️ **Timer Status:** Inactive\n\n❌ Timer is not currently running.", 
+            flags: 64 
           });
         }
-        
+
         const elapsed = getTimeElapsed(ticket.timerStartTime);
         const embed = new EmbedBuilder()
           .setColor("Blue")
@@ -512,44 +561,44 @@ client.on("interactionCreate", async interaction => {
           .setDescription(`**Status:** ✅ Active\n**Time Elapsed:** ${elapsed}\n**Reminders Sent:** ${ticket.reminderCount}\n**Creator:** <@${ticket.creatorId}>`)
           .setFooter({ text: "Staff alert will trigger at 24 hours" })
           .setTimestamp();
-        
-        await interaction.editReply({ embeds: [embed] });
+
+        await interaction.reply({ embeds: [embed], flags: 64 });
         break;
     }
   }
 
   // === /CREATOR COMMAND ===
   if (interaction.commandName === "creator") {
-    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
-    
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
 
     if (action === "check") {
       if (!ticket) {
-        return interaction.editReply({ 
-          content: "❌ No creator assigned yet."
+        return interaction.reply({ 
+          content: "❌ No creator assigned yet.", 
+          flags: 64 
         });
       }
-      
+
       const embed = new EmbedBuilder()
         .setColor("Green")
         .setTitle("🎫 Ticket Creator")
         .setDescription(`**Creator:** <@${ticket.creatorId}>\n**User ID:** ${ticket.creatorId}`)
         .setFooter({ text: "Use /creator assign to change if incorrect" })
         .setTimestamp();
-      
-      await interaction.editReply({ embeds: [embed] });
-      
+
+      await interaction.reply({ embeds: [embed], flags: 64 });
+
     } else if (action === "assign") {
       const user = interaction.options.getUser("user");
-      
+
       if (!user) {
-        return interaction.editReply({ 
-          content: "❌ You must provide a user to assign."
+        return interaction.reply({ 
+          content: "❌ You must provide a user to assign.", 
+          flags: 64 
         });
       }
-      
+
       // Create or update ticket creator
       if (!ticket) {
         await Ticket.create({
@@ -562,9 +611,10 @@ client.on("interactionCreate", async interaction => {
         ticket.creatorId = user.id;
         await ticket.save();
       }
-      
-      await interaction.editReply({ 
-        content: `✅ **Ticket creator manually assigned to** <@${user.id}>`
+
+      await interaction.reply({ 
+        content: `✅ **Ticket creator manually assigned to** <@${user.id}>`, 
+        flags: 64 
       });
       log(`✏️ **Ticket creator manually assigned** to <@${user.id}> in ${channel}`, channel.guild);
     }
@@ -572,13 +622,12 @@ client.on("interactionCreate", async interaction => {
 
   // === /RESET COMMAND ===
   if (interaction.commandName === "reset") {
-    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
-    
     const ticket = await Ticket.findOne({ channelId: channel.id });
-    
+
     if (!ticket) {
-      return interaction.editReply({ 
-        content: "❌ No ticket data found in this channel."
+      return interaction.reply({ 
+        content: "❌ No ticket data found in this channel.", 
+        flags: 64 
       });
     }
 
@@ -590,22 +639,22 @@ client.on("interactionCreate", async interaction => {
     ticket.timerStartTime = null;
     await ticket.save();
 
-    await interaction.editReply({ 
-      content: "🔄 **Ticket reset successfully!**\n\n• Reminder count: 0\n• Timer: Stopped\n• Creator: Unchanged\n\nStaff can now restart the timer."
+    await interaction.reply({ 
+      content: "🔄 **Ticket reset successfully!**\n\n• Reminder count: 0\n• Timer: Stopped\n• Creator: Unchanged\n\nStaff can now restart the timer.", 
+      flags: 64 
     });
-    
+
     log(`🔄 **Ticket reset** in ${channel}`, channel.guild);
   }
 
   // === /CLEANUP COMMAND ===
   if (interaction.commandName === "cleanup") {
-    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
-    
     const days = interaction.options.getInteger("days");
     const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
 
     // Find all tickets to check
     const allTickets = await Ticket.find({});
+    let deletedCount = 0;
     const ticketsToDelete = [];
 
     for (const ticket of allTickets) {
@@ -615,10 +664,12 @@ client.on("interactionCreate", async interaction => {
       const channelExists = await client.channels.fetch(ticket.channelId).catch(() => null);
       if (!channelExists) {
         shouldDelete = true;
+        console.log(`🗑️ Channel ${ticket.channelId} no longer exists`);
       }
       // Check if timer is old
       else if (ticket.timerStartTime && ticket.timerStartTime < cutoffDate) {
         shouldDelete = true;
+        console.log(`🗑️ Ticket ${ticket.channelId} timer older than ${days} days`);
       }
 
       if (shouldDelete) {
@@ -627,8 +678,9 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (ticketsToDelete.length === 0) {
-      return interaction.editReply({ 
-        content: `✅ **No cleanup needed!**\n\n• No tickets older than ${days} days\n• No deleted channels found\n• Database is clean`
+      return interaction.reply({ 
+        content: `✅ **No cleanup needed!**\n\n• No tickets older than ${days} days\n• No deleted channels found\n• Database is clean`, 
+        flags: 64 
       });
     }
 
@@ -637,8 +689,9 @@ client.on("interactionCreate", async interaction => {
       channelId: { $in: ticketsToDelete }
     });
 
-    await interaction.editReply({ 
-      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} old tickets\n• Removed tickets from deleted channels\n• Database storage freed up`
+    await interaction.reply({ 
+      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} old tickets\n• Removed tickets from deleted channels\n• Database storage freed up`, 
+      flags: 64 
     });
 
     log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets`, channel.guild);
@@ -646,22 +699,22 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP-ALL COMMAND ===
   if (interaction.commandName === "cleanup-all") {
-    await interaction.deferReply({ flags: 64 }); // ADDED TO FIX TIMEOUT
-    
     // Get total count before deleting
     const totalTickets = await Ticket.countDocuments();
 
     if (totalTickets === 0) {
-      return interaction.editReply({ 
-        content: `✅ **Database is already empty!**\n\n• No tickets to clean up\n• Database is clean`
+      return interaction.reply({ 
+        content: `✅ **Database is already empty!**\n\n• No tickets to clean up\n• Database is clean`, 
+        flags: 64 
       });
     }
 
     // Delete ALL tickets - no checks, just wipe everything
     const result = await Ticket.deleteMany({});
 
-    await interaction.editReply({ 
-      content: `🗑️ **Complete Database Wipe!**\n\n• Deleted **${result.deletedCount}** tickets\n• All ticket data removed\n• Database completely cleaned`
+    await interaction.reply({ 
+      content: `🗑️ **Complete Database Wipe!**\n\n• Deleted **${result.deletedCount}** tickets\n• All ticket data removed\n• Database completely cleaned`, 
+      flags: 64 
     });
 
     console.log(`🗑️ CLEANUP-ALL: Wiped entire database (${result.deletedCount} tickets)`);
@@ -713,9 +766,8 @@ async function connectMongo() {
 await connectMongo();
 
 client.login(DISCORD_BOT_TOKEN);
-console.log("🔌 Discord login called, waiting for ready event...");
 
-// Register slash commands after login (SEPARATE READY EVENT AFTER LOGIN)
+// Register slash commands after login (same pattern as MongoDB)
 client.once(Events.ClientReady, async (readyClient) => {
   console.log("🔄 Registering slash commands...");
   try {
