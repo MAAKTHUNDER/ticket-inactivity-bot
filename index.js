@@ -277,6 +277,19 @@ client.once(Events.ClientReady, async () => {
       }
     }
   }
+
+  // Register slash commands
+  console.log("🔄 Registering slash commands...");
+  try {
+    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
+    await rest.put(
+      Routes.applicationCommands(client.user.id),
+      { body: commands }
+    );
+    console.log("✅ Slash commands registered successfully!");
+  } catch (error) {
+    console.error("❌ Command registration error:", error);
+  }
   
   } catch (error) {
     console.error("❌ READY EVENT ERROR:", error);
@@ -713,21 +726,6 @@ async function connectMongo() {
 await connectMongo();
 
 client.login(DISCORD_BOT_TOKEN);
-
-// Register slash commands after login (same pattern as MongoDB)
-client.once(Events.ClientReady, async (readyClient) => {
-  console.log("🔄 Registering slash commands...");
-  try {
-    const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
-    await rest.put(
-      Routes.applicationCommands(readyClient.user.id),
-      { body: commands }
-    );
-    console.log("✅ Slash commands registered successfully!");
-  } catch (error) {
-    console.error("❌ Command registration error:", error);
-  }
-});
 
 // === KEEP-ALIVE WEB SERVER FOR RENDER ===
 const PORT = process.env.PORT || 3000;
