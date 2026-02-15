@@ -95,7 +95,13 @@ const commands = [
 // --- LOG HELPER ---
 function log(message, guild) {
   const channel = guild.channels.cache.get(LOG_CHANNEL_ID);
-  if (channel) channel.send(message).catch(() => {});
+  if (!channel) {
+    console.error(`⚠️ Log channel not found: ${LOG_CHANNEL_ID}`);
+    return;
+  }
+  channel.send(message).catch(err => {
+    console.error(`⚠️ Failed to send log message: ${err.message}`);
+  });
 }
 
 // --- CLEAR TIMERS ---
@@ -432,30 +438,30 @@ client.on("interactionCreate", async interaction => {
 
   // === /TIMER COMMAND ===
   if (interaction.commandName === "timer") {
+    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
 
     switch(action) {
       case "stop":
         if (!ticket || !ticket.timerStartTime) {
-          return interaction.reply({ 
-            content: "⏹️ No active timer to stop.", 
-            flags: 64 
+          return interaction.editReply({ 
+            content: "⏹️ No active timer to stop."
           });
         }
         clearAllTimers(channel.id);
         ticket.timerStartTime = null;
         ticket.reminderCount = 0;
         await ticket.save();
-        await interaction.reply({ content: "⏹️ **Timer stopped immediately.**", flags: 64 });
+        await interaction.editReply({ content: "⏹️ **Timer stopped immediately.**" });
         log(`⏹️ **Timer manually stopped** in ${channel}`, channel.guild);
         break;
 
       case "restart":
         if (!ticket) {
-          return interaction.reply({ 
-            content: "❌ No ticket data found. Please assign a creator first.", 
-            flags: 64 
+          return interaction.editReply({ 
+            content: "❌ No ticket data found. Please assign a creator first."
           });
         }
         clearAllTimers(channel.id);
@@ -479,25 +485,22 @@ client.on("interactionCreate", async interaction => {
         
         timers.set(channel.id, timer);
         
-        await interaction.reply({ 
-          content: "🔄 **Timer restarted immediately.** First reminder will be sent in 6 hours.", 
-          flags: 64 
+        await interaction.editReply({ 
+          content: "🔄 **Timer restarted immediately.** First reminder will be sent in 6 hours."
         });
         log(`🔄 **Timer manually restarted** in ${channel}`, channel.guild);
         break;
 
       case "status":
         if (!ticket) {
-          return interaction.reply({ 
-            content: "❌ No ticket data found.", 
-            flags: 64 
+          return interaction.editReply({ 
+            content: "❌ No ticket data found."
           });
         }
         
         if (!ticket.timerStartTime) {
-          return interaction.reply({ 
-            content: "⏱️ **Timer Status:** Inactive\n\n❌ Timer is not currently running.", 
-            flags: 64 
+          return interaction.editReply({ 
+            content: "⏱️ **Timer Status:** Inactive\n\n❌ Timer is not currently running."
           });
         }
         
@@ -509,21 +512,22 @@ client.on("interactionCreate", async interaction => {
           .setFooter({ text: "Staff alert will trigger at 24 hours" })
           .setTimestamp();
         
-        await interaction.reply({ embeds: [embed], flags: 64 });
+        await interaction.editReply({ embeds: [embed] });
         break;
     }
   }
 
   // === /CREATOR COMMAND ===
   if (interaction.commandName === "creator") {
+    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    
     const action = interaction.options.getString("action");
     const ticket = await Ticket.findOne({ channelId: channel.id });
 
     if (action === "check") {
       if (!ticket) {
-        return interaction.reply({ 
-          content: "❌ No creator assigned yet.", 
-          flags: 64 
+        return interaction.editReply({ 
+          content: "❌ No creator assigned yet."
         });
       }
       
@@ -534,15 +538,14 @@ client.on("interactionCreate", async interaction => {
         .setFooter({ text: "Use /creator assign to change if incorrect" })
         .setTimestamp();
       
-      await interaction.reply({ embeds: [embed], flags: 64 });
+      await interaction.editReply({ embeds: [embed] });
       
     } else if (action === "assign") {
       const user = interaction.options.getUser("user");
       
       if (!user) {
-        return interaction.reply({ 
-          content: "❌ You must provide a user to assign.", 
-          flags: 64 
+        return interaction.editReply({ 
+          content: "❌ You must provide a user to assign."
         });
       }
       
@@ -559,9 +562,8 @@ client.on("interactionCreate", async interaction => {
         await ticket.save();
       }
       
-      await interaction.reply({ 
-        content: `✅ **Ticket creator manually assigned to** <@${user.id}>`, 
-        flags: 64 
+      await interaction.editReply({ 
+        content: `✅ **Ticket creator manually assigned to** <@${user.id}>`
       });
       log(`✏️ **Ticket creator manually assigned** to <@${user.id}> in ${channel}`, channel.guild);
     }
@@ -569,12 +571,13 @@ client.on("interactionCreate", async interaction => {
 
   // === /RESET COMMAND ===
   if (interaction.commandName === "reset") {
+    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    
     const ticket = await Ticket.findOne({ channelId: channel.id });
     
     if (!ticket) {
-      return interaction.reply({ 
-        content: "❌ No ticket data found in this channel.", 
-        flags: 64 
+      return interaction.editReply({ 
+        content: "❌ No ticket data found in this channel."
       });
     }
 
@@ -586,9 +589,8 @@ client.on("interactionCreate", async interaction => {
     ticket.timerStartTime = null;
     await ticket.save();
 
-    await interaction.reply({ 
-      content: "🔄 **Ticket reset successfully!**\n\n• Reminder count: 0\n• Timer: Stopped\n• Creator: Unchanged\n\nStaff can now restart the timer.", 
-      flags: 64 
+    await interaction.editReply({ 
+      content: "🔄 **Ticket reset successfully!**\n\n• Reminder count: 0\n• Timer: Stopped\n• Creator: Unchanged\n\nStaff can now restart the timer."
     });
     
     log(`🔄 **Ticket reset** in ${channel}`, channel.guild);
@@ -596,6 +598,8 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP COMMAND ===
   if (interaction.commandName === "cleanup") {
+    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    
     const days = interaction.options.getInteger("days");
     const cutoffDate = Date.now() - (days * 24 * 60 * 60 * 1000);
 
@@ -622,9 +626,8 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (ticketsToDelete.length === 0) {
-      return interaction.reply({ 
-        content: `✅ **No cleanup needed!**\n\n• No tickets older than ${days} days\n• No deleted channels found\n• Database is clean`, 
-        flags: 64 
+      return interaction.editReply({ 
+        content: `✅ **No cleanup needed!**\n\n• No tickets older than ${days} days\n• No deleted channels found\n• Database is clean`
       });
     }
 
@@ -633,9 +636,8 @@ client.on("interactionCreate", async interaction => {
       channelId: { $in: ticketsToDelete }
     });
 
-    await interaction.reply({ 
-      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} old tickets\n• Removed tickets from deleted channels\n• Database storage freed up`, 
-      flags: 64 
+    await interaction.editReply({ 
+      content: `🗑️ **Cleanup complete!**\n\n• Deleted ${result.deletedCount} old tickets\n• Removed tickets from deleted channels\n• Database storage freed up`
     });
 
     log(`🗑️ **Cleanup:** Deleted ${result.deletedCount} tickets`, channel.guild);
@@ -643,22 +645,22 @@ client.on("interactionCreate", async interaction => {
 
   // === /CLEANUP-ALL COMMAND ===
   if (interaction.commandName === "cleanup-all") {
+    await interaction.deferReply({ flags: 64 }); // Defer to prevent timeout
+    
     // Get total count before deleting
     const totalTickets = await Ticket.countDocuments();
 
     if (totalTickets === 0) {
-      return interaction.reply({ 
-        content: `✅ **Database is already empty!**\n\n• No tickets to clean up\n• Database is clean`, 
-        flags: 64 
+      return interaction.editReply({ 
+        content: `✅ **Database is already empty!**\n\n• No tickets to clean up\n• Database is clean`
       });
     }
 
     // Delete ALL tickets - no checks, just wipe everything
     const result = await Ticket.deleteMany({});
 
-    await interaction.reply({ 
-      content: `🗑️ **Complete Database Wipe!**\n\n• Deleted **${result.deletedCount}** tickets\n• All ticket data removed\n• Database completely cleaned`, 
-      flags: 64 
+    await interaction.editReply({ 
+      content: `🗑️ **Complete Database Wipe!**\n\n• Deleted **${result.deletedCount}** tickets\n• All ticket data removed\n• Database completely cleaned`
     });
 
     console.log(`🗑️ CLEANUP-ALL: Wiped entire database (${result.deletedCount} tickets)`);
