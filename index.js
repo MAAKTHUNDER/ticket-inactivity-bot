@@ -765,7 +765,17 @@ async function connectMongo() {
 
 await connectMongo();
 
-client.login(DISCORD_BOT_TOKEN);
+console.log("🔐 Attempting Discord login...");
+
+client.login(DISCORD_BOT_TOKEN)
+  .then(() => console.log("✅ Discord login success"))
+  .catch(err => {
+    console.error("❌ DISCORD LOGIN FAILED");
+    console.error(err);
+  });
+
+client.on("error", console.error);
+process.on("unhandledRejection", console.error);
 
 // Register slash commands after login (same pattern as MongoDB)
 client.once(Events.ClientReady, async (readyClient) => {
